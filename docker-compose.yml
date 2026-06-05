@@ -1,0 +1,53 @@
+# ═══════════════════════════════════════════════════════════════════════════
+# docker-compose.yml — bottleneck-analyzer-lib
+#
+# Servicios:
+#   analyzer        → ejecuta el ejemplo básico (non-interactive)
+#   analyzer-test   → ejecuta la suite de tests
+#   analyzer-shell  → abre una shell en el contenedor (para explorar)
+#
+# Uso:
+#   docker compose up analyzer           # Ejecutar ejemplo básico
+#   docker compose up analyzer-test      # Ejecutar tests
+#   docker compose run --rm analyzer-shell   # Shell interactiva
+# ═══════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ── Servicio principal: ejecuta example_basic ───────────────────────────
+  analyzer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: bottleneck-analyzer-lib:1.0
+    container_name: bottleneck-analyzer
+    entrypoint: ["./example_basic"]
+
+  # ── Suite de tests ──────────────────────────────────────────────────────
+  analyzer-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: bottleneck-analyzer-lib:1.0
+    container_name: bottleneck-test
+    entrypoint: ["./test_bottleneck"]
+
+  # ── Shell interactiva para exploración ─────────────────────────────────
+  analyzer-shell:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: bottleneck-analyzer-lib:1.0
+    container_name: bottleneck-shell
+    entrypoint: ["/bin/bash"]
+    stdin_open: true
+    tty: true
+    # Con la shell puedes:
+    #   ./example_basic
+    #   ./example_interactive
+    #   ./test_bottleneck
+    #   ldconfig -p | grep bottleneck
+    #   nm -D /usr/local/lib/libbottleneck_analyzer.so

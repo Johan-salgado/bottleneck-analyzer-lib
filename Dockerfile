@@ -3,100 +3,127 @@
 #
 # Arquitectura multi-stage:
 #
-#   STAGE 1 (builder): Ubuntu + GCC + Make
-#     → Compila libbottleneck_analyzer.so
+#   STAGE 1 (builder):
+#     → Compila la biblioteca dinámica
 #     → Compila ejemplos y tests
-#     → Ejecuta la suite de tests
+#     → Ejecuta la suite de pruebas
 #
-#   STAGE 2 (runtime): Ubuntu mínimo
-#     → Solo tiene la biblioteca .so y los ejemplos compilados
-#     → Sin GCC, sin código fuente
-#     → Imagen final liviana (~80 MB)
+#   STAGE 2 (runtime):
+#     → Imagen mínima solo con binarios y .so
+#     → Sin código fuente
+#     → Sin herramientas de compilación
 #
 # Uso:
-#   docker build -t bottleneck-analyzer-lib:1.0 .
+#   docker build --no-cache -t bottleneck-analyzer-lib:1.0 .
+#
+# Ejecutar:
 #   docker run --rm bottleneck-analyzer-lib:1.0
-#   docker run --rm bottleneck-analyzer-lib:1.0 ./example_interactive
+#
+# Ejecutar ejemplo interactivo:
+#   docker run -it --rm bottleneck-analyzer-lib:1.0 ./example_interactive
 # ═══════════════════════════════════════════════════════════════════════════
 
-# ════════════════════════════════════════════════════════════════════════════
-# STAGE 1 — Build
-# ════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
+# STAGE 1 — BUILD
+# ═══════════════════════════════════════════════════════════════════════════
 FROM ubuntu:22.04 AS builder
 
 LABEL stage="builder"
-LABEL description="Compila libbottleneck_analyzer.so, ejemplos y tests"
+LABEL description="Compilación de la biblioteca dinámica y tests"
 
-# Evitar prompts interactivos durante apt-get
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Instalar herramientas de compilación
+# ──────────────────────────────────────────────────────────────────────────
+# Instalar herramientas de compilación y librerías de desarrollo
+# ──────────────────────────────────────────────────────────────────────────
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+        build-essential \
         gcc \
         make \
+        libc6-dev \
         binutils \
         file \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+# Directorio de trabajo
 WORKDIR /build
 
-# Copiar el proyecto completo
+# Copiar proyecto completo
 COPY . .
 
-# Compilar la biblioteca y los ejemplos
+# ──────────────────────────────────────────────────────────────────────────
+# Compilar biblioteca, ejemplos y tests
+# ──────────────────────────────────────────────────────────────────────────
 RUN make all
 
-# ── Mostrar información de la biblioteca compilada ─────────────────────────
+# ──────────────────────────────────────────────────────────────────────────
+# Mostrar información de la biblioteca compilada
+# ──────────────────────────────────────────────────────────────────────────
 RUN echo "" && \
-    echo "=== Tabla de símbolos exportados de libbottleneck_analyzer.so ===" && \
+    echo "=== Símbolos exportados ===" && \
     nm -D build/libbottleneck_analyzer.so | grep " T " && \
     echo "" && \
-    echo "=== Tipo de archivo ===" && \
+    echo "=== Información del archivo ===" && \
     file build/libbottleneck_analyzer.so && \
     echo ""
 
-# ── Ejecutar la suite de tests dentro del build ────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────
+# Ejecutar tests
+# ──────────────────────────────────────────────────────────────────────────
 RUN echo "=== Ejecutando tests ===" && \
     make tests && \
-    echo "=== Tests completados ==="
+    echo "=== Tests completados correctamente ==="
 
-# ════════════════════════════════════════════════════════════════════════════
-# STAGE 2 — Runtime (imagen final)
-# ════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════
+# STAGE 2 — RUNTIME
+# ═══════════════════════════════════════════════════════════════════════════
 FROM ubuntu:22.04 AS runtime
 
 LABEL maintainer="bottleneck-analyzer-lib"
 LABEL version="1.0.0"
-LABEL description="Bottleneck Analyzer Library — Runtime image"
+LABEL description="Runtime image for Bottleneck Analyzer Library"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Solo las librerías de sistema necesarias para ejecutar binarios C
-# (libc ya viene en ubuntu:22.04; libm es la única dependencia adicional)
+# ──────────────────────────────────────────────────────────────────────────
+# Instalar solo dependencias mínimas de ejecución
+# ──────────────────────────────────────────────────────────────────────────
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        libm-dev \
+        libc6 \
         binutils && \
     rm -rf /var/lib/apt/lists/*
 
+# Directorio principal
 WORKDIR /app
 
-# ── Copiar solo los artefactos compilados desde el builder ─────────────────
+# ──────────────────────────────────────────────────────────────────────────
+# Copiar únicamente artefactos compilados
+# ──────────────────────────────────────────────────────────────────────────
 COPY --from=builder /build/build/libbottleneck_analyzer.so /usr/local/lib/
-COPY --from=builder /build/build/example_basic             ./
-COPY --from=builder /build/build/example_interactive       ./
-COPY --from=builder /build/build/test_bottleneck           ./
 
-# Registrar la biblioteca en el enlazador dinámico del sistema
-# ldconfig lee /usr/local/lib y actualiza /etc/ld.so.cache
+COPY --from=builder /build/build/example_basic /app/
+COPY --from=builder /build/build/example_interactive /app/
+COPY --from=builder /build/build/test_bottleneck /app/
+
+# ──────────────────────────────────────────────────────────────────────────
+# Registrar biblioteca dinámica
+# ──────────────────────────────────────────────────────────────────────────
 RUN ldconfig
 
-# ── Verificar que la biblioteca es accesible ──────────────────────────────
-RUN ldconfig -p | grep bottleneck && \
+# Variable para asegurar búsqueda de librerías
+ENV LD_LIBRARY_PATH=/usr/local/lib
+
+# ──────────────────────────────────────────────────────────────────────────
+# Verificar que la librería quedó registrada
+# ──────────────────────────────────────────────────────────────────────────
+RUN echo "=== Bibliotecas registradas ===" && \
+    ldconfig -p | grep bottleneck && \
     echo "Library registered successfully."
 
-# El entrypoint por defecto ejecuta el ejemplo básico
-# Se puede sobrescribir con: docker run <img> ./example_interactive
+# ──────────────────────────────────────────────────────────────────────────
+# Ejecutable por defecto
+# ──────────────────────────────────────────────────────────────────────────
 ENTRYPOINT ["./example_basic"]
